@@ -118,11 +118,23 @@ class VectorStoreManager:
         documents = filter_complex_metadata(documents)
         print(f"🧹 [向量存储] 已过滤复杂元数据")
 
-        ids = vs.add_documents(documents, **kwargs)
-        elapsed = time.time() - start
-        logger.info(f"[向量存储] 添加文档完成: {len(ids)} 个, 耗时 {elapsed:.2f}s")
-        print(f"✅ [向量存储] 存储完成！{len(ids)} 个向量已保存，耗时 {elapsed:.2f}s")
-        return ids
+        try:
+            ids = vs.add_documents(documents, **kwargs)
+            elapsed = time.time() - start
+            logger.info(f"[向量存储] 添加文档完成: {len(ids)} 个, 耗时 {elapsed:.2f}s")
+            print(f"✅ [向量存储] 存储完成！{len(ids)} 个向量已保存，耗时 {elapsed:.2f}s")
+            return ids
+        except Exception as e:
+            elapsed = time.time() - start
+            error_msg = f"[向量存储] 添加文档失败: {type(e).__name__}: {str(e)[:200]}"
+            logger.error(error_msg, exc_info=True)
+            print(f"❌ [向量存储] 错误 ({elapsed:.2f}s): {type(e).__name__}")
+            print(f"   提示: 请检查网络连接或 API Key，已自动重试 5 次")
+            if "Connection" in str(e) or "timeout" in str(e).lower():
+                print(f"   → 这是网络问题，请:")
+                print(f"     1. 检查网络是否稳定")
+                print(f"     2. 或切换到本地 embedding 模型 (huggingface)")
+            raise
 
     def search(
         self,

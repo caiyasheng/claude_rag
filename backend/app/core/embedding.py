@@ -54,6 +54,8 @@ def get_embedding_model(
             model=model or "text-embedding-3-small",
             api_key=api_key,
             base_url=base_url if base_url else None,
+            timeout=120,
+            max_retries=5,
             **kwargs,
         )
 
@@ -66,14 +68,16 @@ def get_embedding_model(
         )
 
     elif provider == "custom":
-        print(f"⚙️  [嵌入模型] DashScope 兼容模式, 分批大小=10")
+        print(f"⚙️  [嵌入模型] DashScope 兼容模式, 分批大小=5, 超时=120s")
         return OpenAIEmbeddings(
             model=model or config.EMBEDDING_MODEL,
             api_key=api_key or config.EMBEDDING_API_KEY,
             base_url=base_url or config.EMBEDDING_BASE_URL,
             embedding_ctx_length=4096,
-            chunk_size=10,
+            chunk_size=5,
             check_embedding_ctx_length=False,
+            timeout=120,
+            max_retries=5,
             **kwargs,
         )
 

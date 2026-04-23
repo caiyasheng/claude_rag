@@ -231,7 +231,34 @@ def chunk_documents(
 
     if strategy == "recursive":
         chunker = RecursiveChunker(**kwargs)
-        return chunker.split_documents(documents)
+        chunks = chunker.split_documents(documents)
+        
+        min_chars = 8
+        valid_chunks = []
+        merged_content = ""
+        merged_metadata = None
+        
+        for chunk in chunks:
+            content = chunk.page_content.strip()
+            if len(content) >= min_chars:
+                if merged_content:
+                    merged_content = merged_content.strip()
+                    if len(merged_content) >= 4:
+                        valid_chunks.append(Document(page_content=merged_content, metadata=merged_metadata or {}))
+                    merged_content = ""
+                valid_chunks.append(chunk)
+            else:
+                merged_content += "\n" + content
+                merged_metadata = chunk.metadata
+        
+        if merged_content.strip() and len(merged_content.strip()) >= 4:
+            valid_chunks.append(Document(page_content=merged_content.strip(), metadata=merged_metadata or {}))
+        
+        if len(chunks) != len(valid_chunks):
+            logger.info(f"[分块器] 优化: {len(chunks)} → {len(valid_chunks)} 个块 (合并过短片段)")
+            print(f"🧹 [分块器] 优化分块: {len(chunks)} → {len(valid_chunks)} 个块 (合并了 {len(chunks)-len(valid_chunks)} 个过短片段)")
+        
+        return valid_chunks
 
     elif strategy == "semantic":
         logger.info("[分块器] 使用语义分块策略")
