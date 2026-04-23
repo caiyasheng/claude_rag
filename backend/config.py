@@ -4,6 +4,9 @@ RAG系统配置
 import os
 from dotenv import load_dotenv
 
+# 基于当前文件路径计算绝对路径基准
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 load_dotenv()
 
 # LLM通用配置
@@ -31,7 +34,7 @@ EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
 EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
 # 向量存储路径
-VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH", "./vectorstore")
+VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH", os.path.join(BASE_DIR, "vectorstore"))
 
 # 分块配置
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
@@ -41,7 +44,11 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 TOP_K = int(os.getenv("TOP_K", "4"))
 
 # 上传文件目录
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
+
+# 确保目录存在
+os.makedirs(VECTORSTORE_PATH, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 import sys
 config = sys.modules[__name__]
