@@ -188,6 +188,34 @@ class VectorStoreManager:
         vs = self.get_vectorstore()
         vs.delete(**kwargs)
 
+    def delete_by_source(self, source: str) -> int:
+        """按文档名称(source)删除对应所有索引块
+
+        Args:
+            source: 文档名称
+
+        Returns:
+            删除的块数量
+        """
+        vs = self.get_vectorstore()
+
+        if self.provider == "chroma":
+            collection = vs._collection
+            result = collection.get(where={"source": source})
+            ids_to_delete = result.get("ids", [])
+
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                logger.info(f"[向量存储] 已删除文档 '{source}' 的 {len(ids_to_delete)} 个索引块")
+                print(f"🗑️  [删除] 已删除文档 '{source}' 的 {len(ids_to_delete)} 个索引块")
+                return len(ids_to_delete)
+            else:
+                logger.info(f"[向量存储] 未找到文档 '{source}' 的索引块")
+                print(f"ℹ️  [删除] 未找到文档 '{source}' 的索引块")
+                return 0
+        else:
+            raise NotImplementedError(f"按 source 删除暂不支持 {self.provider} 提供者")
+
     def clear(self):
         """清空向量存储"""
         if self.provider == "chroma" and os.path.exists(self.persist_directory):

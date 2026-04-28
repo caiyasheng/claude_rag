@@ -54,3 +54,7 @@ def health():
 # API Routes
 from app.api import rag
 app.include_router(rag.router, prefix="/rag", tags=["rag"])
+
+# Eval Routes
+from app.rag_eval.api import router as eval_router
+app.include_router(eval_router, prefix="/eval", tags=["eval"])

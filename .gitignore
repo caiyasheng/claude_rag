@@ -39,8 +39,15 @@ ENV/
 # Database / Storage
 backend/vectorstore/
 backend/uploads/
+backend/app/rag_eval/data/
 *.db
 *.sqlite3
+
+# Temp files
+backend/check_n.py
+backend/test_*.py
+specs/
+*.pyc
 
 # Node
 node_modules/

@@ -56,7 +56,7 @@ async def query(request: QueryRequest):
 async def upload_documents(files: List[UploadFile] = File(...)):
     """上传并索引文档"""
     try:
-        uploaded_paths = []
+        uploaded_files = []
         for file in files:
             # 保存文件
             file_id = str(uuid.uuid4())
@@ -68,15 +68,18 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 content = await file.read()
                 f.write(content)
 
-            uploaded_paths.append(filepath)
+            uploaded_files.append({
+                "path": filepath,
+                "original_name": file.filename
+            })
 
         # 索引文档
         rag_service = get_rag_service()
-        chunk_count = rag_service.index_documents(uploaded_paths)
+        chunk_count = rag_service.index_documents_with_original_names(uploaded_files)
 
         return {
             "success": True,
-            "files": [f.filename for f in files],
+            "files": [f["original_name"] for f in uploaded_files],
             "chunks": chunk_count,
         }
     except Exception as e:
@@ -103,6 +106,23 @@ async def get_all_chunks(limit: int = 1000):
         return rag_service.get_all_chunks(limit=limit)
     except Exception as e:
         logger.error(f"Get chunks error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/documents/delete")
+async def delete_document(source: str):
+    """按文档名称删除对应索引"""
+    try:
+        rag_service = get_rag_service()
+        deleted_count = rag_service.delete_document(source)
+        return {
+            "success": True,
+            "source": source,
+            "deleted_chunks": deleted_count,
+            "message": f"Deleted {deleted_count} chunks for document: {source}"
+        }
+    except Exception as e:
+        logger.error(f"Delete document error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

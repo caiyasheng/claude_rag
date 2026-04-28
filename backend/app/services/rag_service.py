@@ -61,6 +61,43 @@ class RAGService:
 
         return len(chunks)
 
+    def index_documents_with_original_names(self, files: List[dict]) -> int:
+        """索引文档并保留原始文件名
+
+        Args:
+            files: 包含 path 和 original_name 的字典列表
+
+        Returns:
+            索引的文档块数量
+        """
+        all_chunks = []
+
+        for file_info in files:
+            filepath = file_info["path"]
+            original_name = file_info["original_name"]
+
+            # 加载文档
+            documents = load_documents(filepath, source_type="file")
+
+            # 分块
+            chunks = chunk_documents(
+                documents,
+                strategy="recursive",
+                chunk_size=config.CHUNK_SIZE,
+                chunk_overlap=config.CHUNK_OVERLAP,
+            )
+
+            # 覆盖 metadata 中的 source 为原始文件名
+            for chunk in chunks:
+                chunk.metadata["source"] = original_name
+
+            all_chunks.extend(chunks)
+
+        vs = self.vectorstore_manager
+        vs.add_documents(all_chunks)
+
+        return len(all_chunks)
+
     def query(self, question: str, k: int = None, return_docs: bool = False) -> Union[str, tuple]:
         """查询
 
@@ -100,9 +137,29 @@ class RAGService:
             vs = self.vectorstore_manager.get_vectorstore()
             collection = vs._collection
             count = collection.count()
-            return {"total_chunks": count}
+
+            # 按 source 聚合文档列表
+            files = []
+            if count > 0:
+                data = collection.get(limit=count)
+                sources = set()
+                for m in data["metadatas"]:
+                    if m and m.get("source"):
+                        sources.add(m.get("source"))
+                files = sorted(list(sources))
+
+            return {
+                "total_chunks": count,
+                "files": files,
+                "total_files": len(files),
+            }
         except Exception as e:
-            return {"total_chunks": 0, "error": str(e)}
+            return {
+                "total_chunks": 0,
+                "files": [],
+                "total_files": 0,
+                "error": str(e)
+            }
 
     def get_all_chunks(self, limit: int = 1000) -> dict:
         """获取所有索引块内容（按文档分组）"""
@@ -121,10 +178,15 @@ class RAGService:
             
             chunks_by_file = {}
             
-            for i, doc_id in enumerate(data["ids"]):
-                documents = data.get("documents", [])
-                metadatas = data.get("metadatas", [])
-                
+            ids = data["ids"]
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            
+            # Chroma limit 不生效，手动截断
+            if limit and limit > 0:
+                ids = ids[:limit]
+            
+            for i, doc_id in enumerate(ids):
                 content = documents[i] if i < len(documents) else ""
                 metadata = metadatas[i] if i < len(metadatas) else {}
                 source = metadata.get("source", "unknown") if metadata else "unknown"
@@ -145,6 +207,17 @@ class RAGService:
             }
         except Exception as e:
             return {"total_chunks": 0, "total_files": 0, "chunks_by_file": {}, "error": str(e)}
+
+    def delete_document(self, source: str) -> int:
+        """按文档名称删除对应索引
+
+        Args:
+            source: 文档名称
+
+        Returns:
+            删除的块数量
+        """
+        return self.vectorstore_manager.delete_by_source(source)
 
     def reset_index(self):
         """重置索引"""

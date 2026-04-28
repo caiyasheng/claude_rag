@@ -53,8 +53,8 @@
 
       <div v-else class="documents-container">
         <div v-for="(chunks, filename) in documentsData.chunks_by_file" :key="filename" class="document-card">
-          <div class="document-header" @click="toggleExpand(filename)">
-            <div class="document-info">
+          <div class="document-header">
+            <div class="document-info" @click="toggleExpand(filename)">
               <el-icon class="doc-icon"><Document /></el-icon>
               <div>
                 <div class="doc-name">{{ getFileName(filename) }}</div>
@@ -65,9 +65,19 @@
                 </div>
               </div>
             </div>
-            <el-icon class="expand-icon" :class="{ expanded: expandedFiles.includes(filename) }">
-              <ArrowDown />
-            </el-icon>
+            <div class="document-actions">
+              <el-button 
+                type="danger" 
+                link 
+                size="small"
+                @click.stop="handleDelete(filename, chunks.length)"
+              >
+                <el-icon><Delete /></el-icon> 删除
+              </el-button>
+              <el-icon class="expand-icon" :class="{ expanded: expandedFiles.includes(filename) }" @click="toggleExpand(filename)">
+                <ArrowDown />
+              </el-icon>
+            </div>
           </div>
 
           <div v-if="expandedFiles.includes(filename)" class="chunks-panel">
@@ -88,13 +98,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onActivated } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   ArrowLeft, Refresh, Document, Files, Loading, 
-  FolderOpened, ArrowDown 
+  FolderOpened, ArrowDown, Delete
 } from '@element-plus/icons-vue'
-import { getAllChunks } from '../utils/api.js'
+import { getAllChunks, deleteDocument } from '../utils/api.js'
 
 const loading = ref(false)
 const documentsData = ref({})
@@ -135,7 +145,33 @@ function getTotalChars(chunks) {
   return chunks.reduce((sum, c) => sum + (c.content?.length || 0), 0).toLocaleString()
 }
 
+async function handleDelete(filename, chunkCount) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除文档「${getFileName(filename)}」吗？\n将删除 ${chunkCount} 个索引块，此操作不可恢复！`,
+      '删除确认',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    
+    await deleteDocument(filename)
+    ElMessage.success(`已成功删除文档「${getFileName(filename)}」`)
+    await loadDocuments()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error('删除失败: ' + (e.message || '未知错误'))
+    }
+  }
+}
+
 onMounted(() => {
+  loadDocuments()
+})
+
+onActivated(() => {
   loadDocuments()
 })
 </script>
@@ -257,7 +293,6 @@ onMounted(() => {
   justify-content: space-between;
   padding: 16px 20px;
   background: var(--bg-raised);
-  cursor: pointer;
   transition: background 0.2s;
 }
 .document-header:hover {
@@ -267,6 +302,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  cursor: pointer;
+  flex: 1;
+}
+.document-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .doc-icon {
   font-size: 24px;
@@ -287,6 +329,7 @@ onMounted(() => {
 .expand-icon {
   color: var(--text-muted);
   transition: transform 0.2s;
+  cursor: pointer;
 }
 .expand-icon.expanded {
   transform: rotate(180deg);

@@ -19,6 +19,14 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 MINIMAX_API_URL = os.getenv("MINIMAX_API_URL", "https://api.minimax.chat/v1")
 
+# 通义千问配置（专门用于 RAGAS 评测，兼容性 100%）
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+DASHSCOPE_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+QWEN_MODEL = "qwen-max-1201"
+
+# ✅ RAGAS 评测专用 LLM （推荐 qwen，零失败）
+RAG_EVAL_LLM = os.getenv("RAG_EVAL_LLM", "qwen")
+
 # DeepSeek配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")

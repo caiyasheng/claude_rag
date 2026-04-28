@@ -7,7 +7,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
 
 export const http = axios.create({
   baseURL: BASE_URL,
-  timeout: 60_000,
+  timeout: 300_000,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -60,3 +60,60 @@ export const resetIndex = () => http.delete('/rag/documents/reset')
  * @returns {Promise}
  */
 export const getAllChunks = (limit = 1000) => http.get('/rag/documents/chunks', { params: { limit } })
+
+/**
+ * 按文档名称删除索引
+ * @param {string} source - 文档名称
+ * @returns {Promise}
+ */
+export const deleteDocument = (source) =>
+  http.delete('/rag/documents/delete', { params: { source } })
+
+// ============== 评测相关 ==============
+
+/**
+ * 获取评测统计
+ */
+export const getEvalStats = () => http.get('/eval/stats')
+
+/**
+ * 生成测试集
+ * @param {number} maxSamples
+ */
+export const generateDataset = (maxSamples = 50) =>
+  http.post('/eval/dataset/generate', null, { params: { max_samples: maxSamples } })
+
+/**
+ * 上传测试集
+ * @param {File} file
+ */
+export const uploadDataset = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post('/eval/dataset/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+/**
+ * 获取当前测试集
+ */
+export const getDataset = () => http.get('/eval/dataset')
+
+/**
+ * 运行评测
+ * @param {number} maxSamples
+ */
+export const runEvaluation = (maxSamples) =>
+  http.post('/eval/run', null, { params: { max_samples: maxSamples } })
+
+/**
+ * 获取报告列表
+ */
+export const getReports = () => http.get('/eval/reports')
+
+/**
+ * 获取报告内容
+ * @param {'csv'|'json'} reportType
+ */
+export const getReport = (reportType) => http.get(`/eval/report/${reportType}`)

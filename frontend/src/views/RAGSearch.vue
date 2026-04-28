@@ -7,6 +7,9 @@
         <p class="page-sub">上传文档，基于知识库进行智能问答</p>
       </div>
       <div class="header-right">
+        <el-button @click="$router.push('/eval')">
+          <el-icon><DataAnalysis /></el-icon> RAG评测
+        </el-button>
         <el-button @click="$router.push('/documents')">
           <el-icon><Document /></el-icon> 文档管理
         </el-button>
@@ -112,7 +115,7 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { UploadFilled, Upload, Search, Delete, Refresh, Document, Right } from '@element-plus/icons-vue'
+import { UploadFilled, Upload, Search, Delete, Refresh, Document, Right, DataAnalysis } from '@element-plus/icons-vue'
 import { uploadDocuments, getStats, queryRAG, resetIndex } from '../utils/api.js'
 
 const uploadRef = ref()

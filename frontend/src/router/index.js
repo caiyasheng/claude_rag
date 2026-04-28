@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import RAGSearch from '../views/RAGSearch.vue'
 import Documents from '../views/Documents.vue'
+import RAGEval from '../views/RAGEval.vue'
 
 const routes = [
   {
@@ -14,6 +15,12 @@ const routes = [
     name: 'Documents',
     component: Documents,
     meta: { title: '文档管理' },
+  },
+  {
+    path: '/eval',
+    name: 'RAGEval',
+    component: RAGEval,
+    meta: { title: 'RAG 评测' },
   },
 ]
 
