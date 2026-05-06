@@ -32,9 +32,9 @@ class EvalRecord:
     """评测记录 - 统一数据结构"""
     sample: EvalSample
     result: Optional[RagResult]  # None表示执行失败
-    scores: Optional[dict] = None  # RAGAS评测分数
+    scores: Optional[dict] = None  # DeepEval 生成层评测分数
     issues: list[str] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)  # 可扩展：latency, token_count, error等
+    metadata: dict = field(default_factory=dict)  # 可扩展：latency, token_count, error等, retrieval_metrics等
 
     def is_success(self) -> bool:
         """是否成功执行"""

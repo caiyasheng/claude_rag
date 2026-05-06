@@ -96,9 +96,21 @@ export const uploadDataset = (file) => {
 }
 
 /**
- * 获取当前测试集
+ * 获取当前测试集（分页）
  */
-export const getDataset = () => http.get('/eval/dataset')
+export const getDataset = (page = 1, pageSize = 5) =>
+  http.get('/eval/dataset', { params: { page, page_size: pageSize } })
+
+/**
+ * 删除单条测试数据
+ * @param {string} sampleId
+ */
+export const deleteSample = (sampleId) => http.delete(`/eval/dataset/${sampleId}`)
+
+/**
+ * 清空测试集
+ */
+export const clearDataset = () => http.delete('/eval/dataset')
 
 /**
  * 运行评测

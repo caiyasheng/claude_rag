@@ -73,6 +73,46 @@ def save_dataset_to_json(samples: List[EvalSample], file_path: str) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def delete_sample_from_json(file_path: str, sample_id: str) -> bool:
+    """从JSON文件删除单条测试数据
+
+    Args:
+        file_path: JSON文件路径
+        sample_id: 要删除的样本ID
+
+    Returns:
+        是否删除成功
+    """
+    if not os.path.exists(file_path):
+        return False
+
+    samples = load_dataset_from_json(file_path)
+    original_count = len(samples)
+    samples = [s for s in samples if s.id != sample_id]
+
+    if len(samples) == original_count:
+        return False  # 没找到要删除的样本
+
+    save_dataset_to_json(samples, file_path)
+    return True
+
+
+def clear_dataset(file_path: str) -> bool:
+    """清空测试集
+
+    Args:
+        file_path: JSON文件路径
+
+    Returns:
+        是否成功
+    """
+    if not os.path.exists(file_path):
+        return True  # 文件不存在就算成功
+
+    os.remove(file_path)
+    return True
+
+
 def validate_sample(item: dict) -> bool:
     """校验单条数据字段完整性
 

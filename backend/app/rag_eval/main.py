@@ -1,16 +1,16 @@
 """
-评测主流程 - T7
-包含异常处理的评测执行器
+评测主流程 - 检索层 + 生成层分离评测
+使用 DeepEval 框架
 """
 import os
 import json
 import concurrent.futures
 from functools import partial
 from typing import List, Optional
-from app.rag_eval.schemas import EvalSample, RagResult, EvalRecord
+from app.rag_eval.schemas import EvalSample, EvalRecord, RagResult
 from app.rag_eval.pipeline.runner import run_rag
-from app.rag_eval.evaluator.ragas_eval import evaluate_with_ragas
-from app.rag_eval.analyzer.diagnose import diagnose
+from app.rag_eval.evaluator.deep_eval import get_deepEval_evaluator
+from app.rag_eval.evaluator.retrieval_eval import get_retrieval_evaluator, RetrievalMetrics
 from app.rag_eval.report.generator import generate_csv_report, generate_json_summary, generate_html_report
 from app.rag_eval.dataset.loader import load_dataset_from_json, save_dataset_to_json
 from app.rag_eval.config import eval_config
@@ -19,10 +19,11 @@ MAX_PARALLEL = 3
 
 
 class EvalEngine:
-    """评测引擎 - 统筹整个评测流程"""
+    """评测引擎 - 统筹整个评测流程（检索层 + 生成层分离）"""
 
-    def __init__(self, dataset_path: str = None):
+    def __init__(self, dataset_path: str = None, k: int = 4):
         self.dataset_path = dataset_path
+        self.k = k
         self.records: List[EvalRecord] = []
         self.current_index = 0
         self.total_count = 0
@@ -32,7 +33,6 @@ class EvalEngine:
         path = dataset_path or self.dataset_path
         if not path:
             raise ValueError("No dataset path provided")
-
         return load_dataset_from_json(path)
 
     def run_evaluation(
@@ -41,7 +41,7 @@ class EvalEngine:
         max_samples: int = None,
         progress_callback=None,
     ) -> List[EvalRecord]:
-        """运行完整评测流程
+        """运行 RAG 检索 + 生成
 
         Args:
             samples: 测试样本列表
@@ -58,14 +58,11 @@ class EvalEngine:
         self.current_index = 0
         self.total_count = len(samples)
 
-        print(f"开始评测，共 {len(samples)} 条数据，并发度: {MAX_PARALLEL}")
-
-        import concurrent.futures
-        from functools import partial
+        print(f"开始 RAG 检索+生成，共 {len(samples)} 条数据，并发度: {MAX_PARALLEL}")
 
         def evaluate_one(sample, idx):
             try:
-                result = run_rag(sample.question)
+                result = run_rag(sample.question, k=self.k)
                 record = EvalRecord(
                     sample=sample,
                     result=result,
@@ -99,15 +96,17 @@ class EvalEngine:
             if progress_callback:
                 progress_callback(i + 1, len(samples), record)
 
-        print(f"评测完成，成功: {sum(1 for r in self.records if r.is_success())}, 失败: {sum(1 for r in self.records if not r.is_success())}")
-
+        print(f"RAG 执行完成，成功: {sum(1 for r in self.records if r.is_success())}, 失败: {sum(1 for r in self.records if not r.is_success())}")
         return self.records
 
-    def run_ragas_evaluation(self, records: List[EvalRecord] = None) -> List[EvalRecord]:
-        """执行RAGAS评测
+    def run_retrieval_evaluation(
+        self,
+        records: List[EvalRecord] = None,
+    ) -> List[EvalRecord]:
+        """执行检索层评测
 
         Args:
-            records: 记录列表，默认使用self.records
+            records: 记录列表，默认使用 self.records
 
         Returns:
             更新后的记录列表
@@ -116,44 +115,83 @@ class EvalEngine:
         if not records:
             return []
 
-        print("开始RAGAS评测...")
+        print("🔍 开始检索层评测...")
+        evaluator = get_retrieval_evaluator(k=self.k)
 
         try:
-            # RAGAS 内部用了 asyncio.run()，新线程运行避免嵌套事件循环
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(evaluate_with_ragas, records)
-                records = future.result()
-                
-            print("RAGAS评测完成")
+            records = evaluator.evaluate_records(records)
+            print("✅ 检索层评测完成")
         except Exception as e:
-            print(f"RAGAS评测失败: {e}")
+            print(f"❌ 检索层评测失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return records
+
+    def run_generation_evaluation(self, records: List[EvalRecord] = None) -> List[EvalRecord]:
+        """执行生成层评测（DeepEval）
+
+        Args:
+            records: 记录列表，默认使用 self.records
+
+        Returns:
+            更新后的记录列表
+        """
+        records = records or self.records
+        if not records:
+            return []
+
+        print("📝 开始生成层评测（DeepEval）...")
+        evaluator = get_deepEval_evaluator()
+
+        try:
+            records = evaluator.evaluate(records)
+            print("✅ 生成层评测完成")
+        except Exception as e:
+            print(f"❌ 生成层评测失败: {e}")
+            import traceback
+            traceback.print_exc()
 
         return records
 
     def diagnose_all(self, records: List[EvalRecord] = None) -> List[EvalRecord]:
-        """对所有记录进行归因诊断"""
+        """对所有记录进行归因诊断（检索+生成综合）"""
         records = records or self.records
 
         for record in records:
+            issues = []
+
+            # 检查检索层指标
+            if "retrieval_metrics" in record.metadata:
+                rm = record.metadata["retrieval_metrics"]
+                if rm and isinstance(rm, RetrievalMetrics):
+                    if rm.hit_rate_at_k < 0.5:
+                        issues.append("检索质量低")
+                    if rm.recall < 0.5:
+                        issues.append("召回不足")
+
+            # 检查生成层指标
             if record.scores:
                 try:
-                    record.issues = diagnose(record.scores)
+                    answer_correctness = record.scores.get("answer_correctness")
+                    faithfulness = record.scores.get("faithfulness")
+                    answer_relevancy = record.scores.get("answer_relevancy")
+
+                    if answer_correctness is not None and answer_correctness < 0.5:
+                        issues.append("答案错误")
+                    if faithfulness is not None and faithfulness < 0.5:
+                        issues.append("幻觉")
+                    if answer_relevancy is not None and answer_relevancy < 0.5:
+                        issues.append("答非所问")
                 except Exception as e:
                     print(f"⚠️ 归因诊断失败: {e}")
-                    record.issues = ["诊断失败"]
+
+            record.issues = issues or ["正常"]
 
         return records
 
     def generate_reports(self, records: List[EvalRecord] = None, output_dir: str = None) -> dict:
-        """生成报告
-
-        Args:
-            records: 记录列表
-            output_dir: 输出目录
-
-        Returns:
-            报告路径信息
-        """
+        """生成报告（检索层 + 生成层）"""
         from datetime import datetime
 
         records = records or self.records
@@ -185,16 +223,18 @@ class EvalEngine:
         self,
         dataset_path: str = None,
         max_samples: int = None,
-        run_ragas: bool = True,
+        run_retrieval: bool = True,
+        run_generation: bool = True,
         output_dir: str = None,
         progress_callback=None,
     ) -> dict:
-        """完整评测流程
+        """完整评测流程（检索层 + 生成层分离）
 
         Args:
             dataset_path: 测试集路径
             max_samples: 最大样本数
-            run_ragas: 是否运行RAGAS评测
+            run_retrieval: 是否运行检索层评测
+            run_generation: 是否运行生成层评测
             output_dir: 输出目录
             progress_callback: 进度回调
 
@@ -204,17 +244,21 @@ class EvalEngine:
         # 1. 加载数据集
         samples = self.load_dataset(dataset_path)
 
-        # 2. 运行RAG
+        # 2. RAG 检索 + 生成
         records = self.run_evaluation(samples, max_samples, progress_callback)
 
-        # 3. RAGAS评测
-        if run_ragas:
-            records = self.run_ragas_evaluation(records)
+        # 3. 检索层评测（使用 RAGAS 生成的 golden_context）
+        if run_retrieval:
+            records = self.run_retrieval_evaluation(records)
 
-        # 4. 归因诊断
+        # 4. 生成层评测
+        if run_generation:
+            records = self.run_generation_evaluation(records)
+
+        # 5. 归因诊断
         records = self.diagnose_all(records)
 
-        # 5. 生成报告
+        # 6. 生成报告
         report_info = self.generate_reports(records, output_dir)
 
         return report_info
@@ -224,7 +268,8 @@ class EvalEngine:
 def run_full_eval(
     dataset_path: str,
     max_samples: int = None,
-    run_ragas: bool = True,
+    run_retrieval: bool = True,
+    run_generation: bool = True,
     output_dir: str = None,
 ) -> dict:
     """便捷函数：运行完整评测"""
@@ -232,6 +277,7 @@ def run_full_eval(
     return engine.run_full_pipeline(
         dataset_path=dataset_path,
         max_samples=max_samples,
-        run_ragas=run_ragas,
+        run_retrieval=run_retrieval,
+        run_generation=run_generation,
         output_dir=output_dir,
     )

@@ -48,6 +48,8 @@
             <el-icon><MagicStick /></el-icon>
             从知识库生成
           </el-button>
+          <el-input-number v-model="generateMaxSamples" :min="1" :max="50" size="default" />
+          <span class="action-hint">条测试集</span>
           <el-button @click="showUploadDialog = true">
             <el-icon><Upload /></el-icon>
             上传测试集
@@ -57,13 +59,26 @@
 
         <div v-if="dataset.length > 0" class="dataset-preview">
           <div class="preview-header">
-            <span class="preview-title">测试集预览（前5条）</span>
+            <span class="preview-title">测试集预览（第{{ (currentPage - 1) * pageSize + 1 }}-{{ Math.min(currentPage * pageSize, totalCount) }}条，共{{ totalCount }}条）</span>
+            <el-button type="danger" size="small" link @click="handleClearDataset">清空全部</el-button>
           </div>
           <div class="preview-list">
-            <div v-for="(item, idx) in dataset.slice(0, 5)" :key="idx" class="preview-item">
-              <div class="preview-q">{{ idx + 1 }}. {{ item.question }}</div>
-              <div class="preview-a">标准答案: {{ item.golden_answer?.slice(0, 50) }}...</div>
+            <div v-for="(item, idx) in dataset" :key="item.id" class="preview-item">
+              <div class="preview-content">
+                <div class="preview-q">{{ (currentPage - 1) * pageSize + idx + 1 }}. {{ item.question }}</div>
+                <div class="preview-a">标准答案: {{ item.golden_answer?.slice(0, 50) }}...</div>
+              </div>
+              <el-button type="danger" size="small" link @click="handleDeleteSample(item.id)">删除</el-button>
             </div>
+          </div>
+          <div class="preview-pagination">
+            <el-pagination
+              v-model:current-page="currentPage"
+              :page-size="pageSize"
+              :total="totalCount"
+              layout="prev, pager, next"
+              @current-change="loadDataset"
+            />
           </div>
         </div>
 
@@ -251,7 +266,8 @@ import {
   Warning, VideoPlay, UploadFilled
 } from '@element-plus/icons-vue'
 import {
-  getEvalStats, generateDataset, uploadDataset, getDataset, runEvaluation
+  getEvalStats, generateDataset, uploadDataset, getDataset, runEvaluation,
+  deleteSample, clearDataset
 } from '../utils/api.js'
 
 const stats = ref({})
@@ -259,11 +275,18 @@ const dataset = ref([])
 const generating = ref(false)
 const evaluating = ref(false)
 const uploading = ref(false)
-const maxSamples = ref(4)
+const generateMaxSamples = ref(4)
+const maxSamples = ref(10)
 const showUploadDialog = ref(false)
 const uploadRef = ref(null)
 const uploadFile = ref(null)
 const evalResult = ref(null)
+
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(5)
+const totalPages = ref(0)
+const totalCount = ref(0)
 
 async function loadStats() {
   try {
@@ -273,21 +296,48 @@ async function loadStats() {
   }
 }
 
-async function loadDataset() {
+async function loadDataset(page = 1) {
   try {
-    const res = await getDataset()
+    const res = await getDataset(page, pageSize.value)
     dataset.value = res.samples || []
+    totalCount.value = res.count || 0
+    totalPages.value = res.total_pages || 0
+    currentPage.value = res.page || 1
   } catch (e) {
     console.error('加载测试集失败', e)
+  }
+}
+
+async function handleDeleteSample(sampleId) {
+  try {
+    await deleteSample(sampleId)
+    ElMessage.success('已删除')
+    await loadDataset(currentPage.value)
+    await loadStats()
+  } catch (e) {
+    ElMessage.error('删除失败: ' + e.message)
+  }
+}
+
+async function handleClearDataset() {
+  try {
+    await clearDataset()
+    ElMessage.success('已清空测试集')
+    dataset.value = []
+    totalCount.value = 0
+    totalPages.value = 0
+    await loadStats()
+  } catch (e) {
+    ElMessage.error('清空失败: ' + e.message)
   }
 }
 
 async function handleGenerate() {
   generating.value = true
   try {
-    const res = await generateDataset(maxSamples.value)
-    ElMessage.success(res.message)
-    await loadDataset()
+    const res = await generateDataset(generateMaxSamples.value)
+    ElMessage.success(`成功生成 ${generateMaxSamples.value} 条测试集`)
+    await loadDataset(1)
     await loadStats()
   } catch (e) {
     ElMessage.error('生成失败: ' + e.message)
@@ -311,7 +361,7 @@ async function handleUpload() {
     ElMessage.success(res.message)
     showUploadDialog.value = false
     uploadFile.value = null
-    await loadDataset()
+    await loadDataset(1)
     await loadStats()
   } catch (e) {
     ElMessage.error('上传失败: ' + e.message)
@@ -500,6 +550,12 @@ onMounted(() => {
   padding: 10px;
   background: var(--bg-raised);
   border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preview-item .preview-content {
+  flex: 1;
 }
 .preview-q {
   font-size: 13px;
@@ -509,6 +565,13 @@ onMounted(() => {
 .preview-a {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.preview-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .empty-hint {
