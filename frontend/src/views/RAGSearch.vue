@@ -47,14 +47,80 @@
         :on-change="handleFileChange"
         :file-list="fileList"
         multiple
-        accept=".pdf,.docx,.txt,.md"
+        accept=".pdf,.docx,.txt,.md,.csv"
       >
         <el-icon class="upload-icon"><UploadFilled /></el-icon>
         <div class="upload-text">
           <span>拖拽文件到此处，或 <em>点击上传</em></span>
-          <span class="upload-tip">支持 PDF, DOCX, TXT, MD 文件</span>
+          <span class="upload-tip">支持 PDF, DOCX, TXT, MD, CSV 文件</span>
         </div>
       </el-upload>
+
+      <div class="parse-options">
+        <div class="parse-option-left">
+          <el-select 
+            v-model="parseStrategy" 
+            placeholder="选择解析模式"
+            style="width: 220px"
+            size="default"
+          >
+            <el-option-group label="🚀 速度优先">
+              <el-option value="fast" label="极速模式 - 纯文字文档最快">
+                <div class="option-content">
+                  <span class="option-label">🚀 极速模式</span>
+                  <span class="option-desc">纯文字合同、规范文档，最快</span>
+                </div>
+              </el-option>
+            </el-option-group>
+            <el-option-group label="⚖️ 平衡模式">
+              <el-option value="auto" label="智能推荐 - 兼顾速度质量">
+                <div class="option-content">
+                  <span class="option-label">🤖 智能推荐</span>
+                  <span class="option-desc">自动检测，大多数场景推荐</span>
+                </div>
+              </el-option>
+              <el-option value="ocr_only" label="扫描件模式 - 轻量OCR">
+                <div class="option-content">
+                  <span class="option-label">📷 扫描件模式</span>
+                  <span class="option-desc">拍照、扫描文档专用</span>
+                </div>
+              </el-option>
+            </el-option-group>
+            <el-option-group label="🎯 质量优先">
+              <el-option value="hi_res" label="高精度 - 表格/图表识别">
+                <div class="option-content">
+                  <span class="option-label">🔍 高精度模式</span>
+                  <span class="option-desc">表格、图表、标题结构</span>
+                </div>
+              </el-option>
+              <el-option value="prd" label="PRD专用 - 产品需求文档">
+                <div class="option-content">
+                  <span class="option-label">📋 PRD专用</span>
+                  <span class="option-desc">产品需求、研究报告</span>
+                </div>
+              </el-option>
+            </el-option-group>
+          </el-select>
+        </div>
+        <el-popover width="320" trigger="hover" placement="left">
+          <template #reference>
+            <el-button text type="info" size="small" class="parse-help">
+              <el-icon><QuestionFilled /></el-icon> 如何选择？
+            </el-button>
+          </template>
+          <div class="help-content">
+            <p><strong>对检索结果不满意？试试：</strong></p>
+            <ul>
+              <li>📄 表格/流程图识别不准 → 高精度模式</li>
+              <li>📋 产品需求文档 → PRD专用模式</li>
+              <li>📷 拍照/扫描件 → 扫描件模式</li>
+              <li>⚡ 追求速度 → 极速模式</li>
+            </ul>
+            <p class="help-note">高精度模式约慢 10-15 倍，但结构识别更准</p>
+          </div>
+        </el-popover>
+      </div>
+
       <div class="upload-actions">
         <el-button type="primary" @click="handleUpload" :loading="uploading" :disabled="fileList.length === 0">
           <el-icon><Upload /></el-icon> 上传并索引
@@ -113,9 +179,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { UploadFilled, Upload, Search, Delete, Refresh, Document, Right, DataAnalysis } from '@element-plus/icons-vue'
+import { UploadFilled, Upload, Search, Delete, Refresh, Document, Right, DataAnalysis, QuestionFilled } from '@element-plus/icons-vue'
 import { uploadDocuments, getStats, queryRAG, resetIndex } from '../utils/api.js'
 
 const uploadRef = ref()
@@ -128,6 +194,7 @@ const querying = ref(false)
 const resetting = ref(false)
 const answer = ref('')
 const retrievedDocs = ref([])
+const parseStrategy = ref('auto')
 
 async function loadStats() {
   statsLoading.value = true
@@ -157,8 +224,13 @@ async function handleUpload() {
   uploading.value = true
   try {
     const files = fileList.value.map((f) => f.raw)
-    const result = await uploadDocuments(files)
-    ElMessage.success(`上传成功！已索引 ${result.chunks} 个文档块`)
+    const result = await uploadDocuments(files, parseStrategy.value)
+    
+    ElMessage.success({
+      message: `[${result.strategy_name}] 上传成功！已索引 ${result.chunks} 个文档块`,
+      duration: 3000
+    })
+    
     clearFiles()
     loadStats()
   } catch (e) {
@@ -320,6 +392,56 @@ loadStats()
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+.parse-options {
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-raised);
+}
+.parse-option-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.parse-help {
+  font-size: 12px;
+}
+.option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.option-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.option-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.help-content p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+.help-content ul {
+  margin: 0 0 8px 0;
+  padding-left: 18px;
+}
+.help-content li {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.help-note {
+  font-size: 11px !important;
+  color: var(--text-muted) !important;
+  margin: 0 !important;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .upload-actions {
   padding: 14px 18px;

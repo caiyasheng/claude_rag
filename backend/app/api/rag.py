@@ -52,13 +52,59 @@ async def query(request: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/parse-strategies")
+async def get_parse_strategies():
+    """获取支持的解析策略列表"""
+    return {
+        "strategies": [
+            {
+                "value": "auto",
+                "label": "智能推荐",
+                "description": "自动检测文档类型，兼顾速度与质量",
+                "speed": "⚡ 快",
+                "useCase": "大多数文档，不知道选什么时推荐"
+            },
+            {
+                "value": "fast",
+                "label": "极速模式",
+                "description": "PyPDF原生文字提取，速度最快",
+                "speed": "🚀 最快",
+                "useCase": "纯文字合同、规范、制度文档"
+            },
+            {
+                "value": "ocr_only",
+                "label": "扫描件模式",
+                "description": "轻量OCR，扫描件拍照文档",
+                "speed": "⏱️ 中等",
+                "useCase": "扫描件、拍照上传的文档"
+            },
+            {
+                "value": "hi_res",
+                "label": "高精度模式",
+                "description": "完整结构解析，表格/图表/标题识别",
+                "speed": "🐢 较慢",
+                "useCase": "PRD、研究报告、设计文档"
+            },
+            {
+                "value": "prd",
+                "label": "PRD文档专用",
+                "description": "产品需求文档增强模式",
+                "speed": "🐢 较慢",
+                "useCase": "PRD、含大量表格的文档"
+            }
+        ]
+    }
+
+
 @router.post("/documents/upload")
-async def upload_documents(files: List[UploadFile] = File(...)):
+async def upload_documents(
+    files: List[UploadFile] = File(...),
+    parse_strategy: str = Form("auto", description="解析策略: auto/fast/ocr_only/hi_res/prd"),
+):
     """上传并索引文档"""
     try:
         uploaded_files = []
         for file in files:
-            # 保存文件
             file_id = str(uuid.uuid4())
             ext = os.path.splitext(file.filename)[1]
             filename = f"{file_id}{ext}"
@@ -73,14 +119,26 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 "original_name": file.filename
             })
 
-        # 索引文档
         rag_service = get_rag_service()
-        chunk_count = rag_service.index_documents_with_original_names(uploaded_files)
+        chunk_count = rag_service.index_documents_with_original_names(
+            uploaded_files,
+            parse_strategy=parse_strategy
+        )
+
+        strategy_names = {
+            "auto": "智能推荐",
+            "fast": "极速模式",
+            "ocr_only": "扫描件模式",
+            "hi_res": "高精度模式",
+            "prd": "PRD文档专用",
+        }
 
         return {
             "success": True,
             "files": [f["original_name"] for f in uploaded_files],
             "chunks": chunk_count,
+            "parse_strategy": parse_strategy,
+            "strategy_name": strategy_names.get(parse_strategy, parse_strategy),
         }
     except Exception as e:
         logger.error(f"Upload error: {e}")

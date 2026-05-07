@@ -1,12 +1,13 @@
 """
 数据加载模块 - 优化的文档解析能力
-支持: PDF, Markdown, HTML, JSON, TXT, 网页等
+支持: PDF, Markdown, HTML, JSON, TXT, CSV, 网页等
 """
 from typing import List, Optional, Union
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_unstructured import UnstructuredLoader
 from unstructured.partition.auto import partition
+from unstructured.partition.csv import partition_csv
 import os
 import logging
 import io
@@ -58,6 +59,9 @@ class DocumentLoader:
             elif strategy == "ocr_only":
                 return self._load_pdf_ocr_only(file_path)
         
+        if filename.lower().endswith(".csv"):
+            return self._load_csv(file_path)
+        
         return self._load_with_unstructured(
             file_path, strategy, coordinates, partition_via_api, languages
         )
@@ -81,7 +85,8 @@ class DocumentLoader:
             docs = loader.load()
             
             for doc in docs:
-                doc.metadata["category"] = "NarrativeText"
+                doc.page_content = self._clean_text(doc.page_content)
+                doc.metadata["category"] = self._infer_category(doc.page_content)
                 
             total_chars = sum(len(doc.page_content) for doc in docs)
             logger.info(f"[文档加载器] PyPDF 加载完成: {len(docs)} 页, {total_chars} 字符")
@@ -113,12 +118,13 @@ class DocumentLoader:
             for page_num, image in enumerate(images, 1):
                 text = pytesseract.image_to_string(image, lang=lang)
                 if text.strip():
+                    cleaned_text = self._clean_text(text)
                     docs.append(Document(
-                        page_content=text,
+                        page_content=cleaned_text,
                         metadata={
                             "source": file_path,
                             "page_number": page_num,
-                            "category": "OCRText",
+                            "category": self._infer_category(cleaned_text),
                             "filename": filename,
                         }
                     ))
@@ -133,29 +139,107 @@ class DocumentLoader:
             print(f"⚠️  OCR 依赖未完全安装，使用标准 hi_res 模式...")
             return self._load_with_unstructured(file_path, "hi_res", False, False, self.languages)
 
+    def _load_csv(self, file_path: str) -> List[Document]:
+        """使用 Unstructured 解析 CSV 文件
+        CSV 会被解析为 Table 元素，保留行列结构
+        """
+        filename = os.path.basename(file_path)
+        try:
+            elements = partition_csv(
+                filename=file_path,
+                include_header=True,
+                infer_table_structure=True,
+            )
+            
+            docs = []
+            for el in elements:
+                doc = Document(
+                    page_content=str(el),
+                    metadata={
+                        "source": file_path,
+                        "filename": filename,
+                        "category": "Table",
+                        "element_id": getattr(el, "id", None),
+                    }
+                )
+                if hasattr(el, "metadata") and hasattr(el.metadata, "text_as_html"):
+                    doc.metadata["table_html"] = el.metadata.text_as_html
+                docs.append(doc)
+            
+            total_rows = len(docs)
+            total_chars = sum(len(doc.page_content) for doc in docs)
+            logger.info(f"[CSV加载器] {filename} 完成: {total_rows} 行, {total_chars} 字符")
+            print(f"✅ [CSV加载器] {filename} 完成: {total_rows} 行, {total_chars} 字符")
+            return docs
+            
+        except Exception as e:
+            logger.error(f"CSV 加载失败: {e}")
+            print(f"❌ [CSV加载器] {filename} 失败: {e}")
+            raise
+
     def _load_with_unstructured(
         self,
         file_path: str,
         strategy: str,
-        coordinates: bool,
-        partition_via_api: bool,
-        languages: List[str],
+        coordinates: bool = False,
+        partition_via_api: bool = False,
+        languages: Optional[List[str]] = None,
     ) -> List[Document]:
         """使用 Unstructured 进行高级解析（支持OCR）"""
         filename = os.path.basename(file_path)
         
-        loader = UnstructuredLoader(
-            file_path=file_path,
-            strategy=strategy,
-            partition_via_api=partition_via_api,
-            coordinates=coordinates,
-            languages=languages,
-        )
+        loader_kwargs = {
+            "file_path": file_path,
+            "strategy": strategy,
+            "partition_via_api": partition_via_api,
+            "coordinates": coordinates,
+            "languages": languages or self.languages,
+        }
+        
+        if strategy == "hi_res":
+            loader_kwargs.update({
+                "table_format": "html",
+                "include_page_breaks": True,
+                "infer_table_structure": True,
+            })
+        
+        loader = UnstructuredLoader(**loader_kwargs)
 
         docs = list(loader.load())
         total_chars = sum(len(doc.page_content) for doc in docs)
         logger.info(f"[文档加载器] 文件 {filename} 加载完成: {len(docs)} 个元素, {total_chars} 字符")
         print(f"✅ [文档加载器] {filename} 加载完成: {len(docs)} 个元素, {total_chars} 字符")
+        return docs
+
+    def load_prd(self, file_path: str) -> List[Document]:
+        """专门加载PRD产品需求文档
+        强制使用 hi_res 模式，最优保留表格、列表、标题层级
+        适用于: PRD、设计文档、研究报告、包含大量图表的文档
+        """
+        filename = os.path.basename(file_path)
+        logger.info(f"[PRD加载器] 开始解析产品需求文档: {filename} (强制hi_res模式)")
+        print(f"📋 [PRD加载器] 解析结构化文档: {filename}")
+        print(f"   → 启用: 表格HTML结构 / 标题层级识别 / 列表还原")
+        
+        docs = self._load_with_unstructured(
+            file_path,
+            strategy="hi_res",
+        )
+        
+        for doc in docs:
+            doc.page_content = self._clean_text(doc.page_content)
+            if "category" not in doc.metadata:
+                doc.metadata["category"] = self._infer_category(doc.page_content)
+        
+        categories = {}
+        for doc in docs:
+            cat = doc.metadata.get("category", "Unknown")
+            categories[cat] = categories.get(cat, 0) + 1
+        
+        category_info = ", ".join([f"{k}:{v}" for k, v in categories.items()])
+        logger.info(f"[PRD加载器] 结构识别结果: {category_info}")
+        print(f"✅ [PRD加载器] 完成! 结构统计: {category_info}")
+        
         return docs
 
     def load_web(self, url: str) -> List[Document]:
@@ -213,18 +297,78 @@ class DocumentLoader:
         Returns:
             Document列表，包含父子关系
         """
-        loader = UnstructuredLoader(
-            file_path=file_path,
-            strategy=self.strategy,
-        )
-
+        loader_kwargs = {
+            "file_path": file_path,
+            "strategy": self.strategy,
+        }
+        
+        if self.strategy == "hi_res":
+            loader_kwargs.update({
+                "table_format": "html",
+                "infer_table_structure": True,
+            })
+        
+        loader = UnstructuredLoader(**loader_kwargs)
         docs = list(loader.load())
 
-        # 如果指定了页面号，过滤
         if page_number is not None:
             docs = [doc for doc in docs if doc.metadata.get("page_number") == page_number]
 
         return docs
+
+    def _clean_text(self, text: str) -> str:
+        """基础文档清洗
+        - 去除多余空白和换行
+        - 去除常见页眉页脚特征
+        - 规范化标点
+        """
+        import re
+        
+        lines = text.split("\n")
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            if not line:
+                continue
+            
+            if re.match(r'^\d+\s*$', line) and len(line) <= 3:
+                continue
+            
+            if len(line) < 50:
+                if re.search(r'第\s*\d+\s*页|Page\s*\d+|版权所有|©|Confidential', line, re.IGNORECASE):
+                    continue
+            
+            cleaned_lines.append(line)
+        
+        result = "\n".join(cleaned_lines)
+        
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        result = re.sub(r' {2,}', ' ', result)
+        
+        return result
+
+    def _infer_category(self, text: str) -> str:
+        """根据内容特征推断元素类别"""
+        import re
+        
+        text_stripped = text.strip()
+        
+        if len(text_stripped) < 80:
+            if re.match(r'^[一二三四五六七八九十]+、|^\d+\.\s|^第[一二三四五六七八九十]+章|^[A-Z][a-z]+(\s+[A-Z][a-z]+){0,5}$', text_stripped):
+                return "Heading"
+            
+            if text_stripped.isupper() and len(text_stripped) < 50:
+                return "Title"
+        
+        if re.match(r'^[-•●○■□▪▫►▸]|^\d+[.、)]\s', text_stripped):
+            return "ListItem"
+        
+        if text_stripped.count("|") >= 2 or text_stripped.count("\t") >= 2:
+            return "Table"
+        
+        return "NarrativeText"
 
 
 def load_documents(
@@ -252,6 +396,8 @@ def load_documents(
 
     if source_type == "web":
         return loader.load_web(source)
+    elif source_type == "prd":
+        return loader.load_prd(source)
     else:
         return loader.load_file(source)
 

@@ -61,8 +61,57 @@ class RAGService:
 
         return len(chunks)
 
-    def index_documents_with_original_names(self, files: List[dict]) -> int:
+    def index_documents_with_original_names(
+        self,
+        files: List[dict],
+        parse_strategy: str = "auto",
+    ) -> int:
         """索引文档并保留原始文件名
+
+        Args:
+            files: 包含 path 和 original_name 的字典列表
+            parse_strategy: 解析策略
+                - auto: 智能自动模式（默认）
+                - fast: 快速模式，纯文字PDF最快
+                - ocr_only: 轻量OCR，扫描件推荐
+                - hi_res: 高精度结构解析，PRD/表格/研究报告推荐
+                - prd: PRD文档专用，强制hi_res+结构增强
+
+        Returns:
+            索引的文档块数量
+        """
+        all_chunks = []
+
+        for file_info in files:
+            filepath = file_info["path"]
+            original_name = file_info["original_name"]
+
+            if parse_strategy == "prd":
+                documents = load_documents(filepath, source_type="prd")
+            else:
+                documents = load_documents(filepath, source_type="file", strategy=parse_strategy)
+
+            chunks = chunk_documents(
+                documents,
+                strategy="recursive",
+                chunk_size=config.CHUNK_SIZE,
+                chunk_overlap=config.CHUNK_OVERLAP,
+            )
+
+            for chunk in chunks:
+                chunk.metadata["source"] = original_name
+                chunk.metadata["parse_strategy"] = parse_strategy
+
+            all_chunks.extend(chunks)
+
+        vs = self.vectorstore_manager
+        vs.add_documents(all_chunks)
+
+        return len(all_chunks)
+
+    def index_prd_documents(self, files: List[dict]) -> int:
+        """索引PRD产品需求文档
+        使用hi_res模式，最优保留表格、标题层级等结构信息
 
         Args:
             files: 包含 path 和 original_name 的字典列表
@@ -76,10 +125,9 @@ class RAGService:
             filepath = file_info["path"]
             original_name = file_info["original_name"]
 
-            # 加载文档
-            documents = load_documents(filepath, source_type="file")
+            print(f"📋 检测到PRD文档，启用结构化解析模式")
+            documents = load_documents(filepath, source_type="prd")
 
-            # 分块
             chunks = chunk_documents(
                 documents,
                 strategy="recursive",
@@ -87,7 +135,6 @@ class RAGService:
                 chunk_overlap=config.CHUNK_OVERLAP,
             )
 
-            # 覆盖 metadata 中的 source 为原始文件名
             for chunk in chunks:
                 chunk.metadata["source"] = original_name
 

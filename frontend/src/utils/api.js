@@ -22,15 +22,23 @@ http.interceptors.response.use(
 /**
  * 上传文档
  * @param {File[]} files
+ * @param {string} parseStrategy - 解析策略: auto/fast/ocr_only/hi_res/prd
  * @returns {Promise}
  */
-export const uploadDocuments = (files) => {
+export const uploadDocuments = (files, parseStrategy = 'auto') => {
   const formData = new FormData()
   files.forEach((file) => formData.append('files', file))
+  formData.append('parse_strategy', parseStrategy)
   return http.post('/rag/documents/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+/**
+ * 获取解析策略列表
+ * @returns {Promise}
+ */
+export const getParseStrategies = () => http.get('/rag/parse-strategies')
 
 /**
  * 获取索引统计
